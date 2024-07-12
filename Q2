@@ -1,0 +1,91 @@
+1. Load a Dataset into DBFS
+Upload File to DBFS:
+
+Use the Databricks UI to upload your file to DBFS.
+Alternatively, use the Databricks CLI to upload the file. For example, using the CLI:
+bash
+Copy code
+databricks fs cp local-file-path dbfs:/path/to/destination
+Load File in Databricks Notebook:
+
+Use Databricks notebooks to read the file. Assuming a JSON file:
+python
+Copy code
+df = spark.read.json("dbfs:/path/to/json/file")
+
+
+2. Flatten JSON Fields
+To flatten nested JSON fields, you can use the from_json and explode functions in Spark. Here's a sample code to flatten JSON:
+
+python
+Copy code
+from pyspark.sql.functions import col, explode, flatten
+
+# Function to flatten JSON
+def flatten_df(nested_df):
+    flat_cols = [col for col in nested_df.columns if not isinstance(nested_df.schema[col].dataType, ArrayType) and not isinstance(nested_df.schema[col].dataType, StructType)]
+    nested_cols = [col for col in nested_df.columns if isinstance(nested_df.schema[col].dataType, ArrayType) or isinstance(nested_df.schema[col].dataType, StructType)]
+    
+    flat_df = nested_df.select(flat_cols + [col(nested_col + "." + field.name).alias(nested_col + "_" + field.name) for nested_col in nested_cols for field in nested_df.schema[nested_col].dataType])
+    
+    return flat_df
+
+# Flatten the DataFrame
+flat_df = flatten_df(df)
+flat_df.show()
+
+
+3. Write Flattened File as External Parquet Table
+Write to External Parquet File:
+
+python
+Copy code
+flat_df.write.parquet("dbfs:/path/to/flattened/parquet")
+Create External Table:
+
+Use SQL in Databricks to create an external table from the parquet file.
+sql
+Copy code
+CREATE TABLE my_external_table
+USING parquet
+LOCATION 'dbfs:/path/to/flattened/parquet'
+Example in a Single Notebook
+Here is a complete example in a Databricks notebook:
+
+python
+Copy code
+# Step 1: Load the JSON file into a DataFrame
+df = spark.read.json("dbfs:/path/to/json/file")
+
+# Step 2: Function to flatten the JSON DataFrame
+from pyspark.sql.functions import col
+from pyspark.sql.types import StructType, ArrayType
+
+def flatten_df(nested_df):
+    flat_cols = [col for col in nested_df.columns if not isinstance(nested_df.schema[col].dataType, (ArrayType, StructType))]
+    nested_cols = [col for col in nested_df.columns if isinstance(nested_df.schema[col].dataType, (ArrayType, StructType))]
+    
+    while len(nested_cols) != 0:
+        nested_col = nested_cols.pop(0)
+        nested_schema = nested_df.schema[nested_col].dataType
+        nested_df = nested_df.select(flat_cols + 
+                                     [col(nested_col + "." + field.name).alias(nested_col + "_" + field.name) 
+                                      for field in nested_schema.fields])
+        flat_cols = [col for col in nested_df.columns if not isinstance(nested_df.schema[col].dataType, (ArrayType, StructType))]
+        nested_cols = [col for col in nested_df.columns if isinstance(nested_df.schema[col].dataType, (ArrayType, StructType))]
+    
+    return nested_df
+
+# Flatten the DataFrame
+flat_df = flatten_df(df)
+flat_df.show()
+
+# Step 3: Write the flattened DataFrame as an external parquet table
+flat_df.write.parquet("dbfs:/path/to/flattened/parquet")
+
+# Creating an external table using SQL
+spark.sql("""
+CREATE TABLE my_external_table
+USING parquet
+LOCATION 'dbfs:/path/to/flattened/parquet'
+""")
